@@ -24,8 +24,8 @@ import {
   Dumbbell,
   Users,
   UserPlus,
-  UserTie,
   Compass,
+  Target,
 } from "lucide-react";
 
 /* -------- Pain points section -------- */
@@ -93,7 +93,7 @@ export const pipeline = [
     body: "Get automatic payment reminders and easily renew your course or upgrade to a better learning plan directly from the website.",
   },
   {
-    icon: UserTie,
+    icon: Target,
     title: "Personalized Coaching",
     body: "Coaches and trainers can monitor student progress, identify areas for improvement, and provide personalized guidance when needed.",
   },
