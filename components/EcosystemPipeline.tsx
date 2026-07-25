@@ -213,7 +213,7 @@ export default function EcosystemPipeline() {
         <div className="max-w-2xl mx-auto text-center">
           <Eyebrow dark>One powerful platform</Eyebrow>
           <h2 className="font-display text-3xl md:text-5xl text-cream text-balance">
-            One Platform That Runs Your Coaching Business Automatically
+            One Platform That Runs Your Coaching Automatically
           </h2>
           <p className="mt-6 text-mist/60 leading-relaxed">
             Imagine if every student got instant access, automatic reminders, and

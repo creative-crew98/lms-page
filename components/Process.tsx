@@ -247,11 +247,6 @@ export default function HowItWorks() {
           })}
         </div>
 
-        <Reveal delay={steps.length * 130 + 150} className="mt-16 flex justify-center">
-          <p className="font-mono text-xs tracking-widest uppercase text-plum/60">
-            Usually ready within a few working days
-          </p>
-        </Reveal>
 
         {/* CTA button */}
         <Reveal delay={steps.length * 130 + 300} className="mt-8 flex justify-center">

@@ -90,7 +90,8 @@ export default function BeforeAfter() {
                       <span className="shrink-0 h-9 w-9 rounded-xl bg-red-50 border border-red-200 text-red-500 flex items-center justify-center">
                         <RowIcon className="h-4 w-4" strokeWidth={1.8} />
                       </span>
-                      <span className="flex-1 text-sm md:text-base text-ink/70 leading-snug">
+                      {/* BEFORE card row text */}
+                      <span className="flex-1 text-sm md:text-base text-black leading-snug">
                         {row.before}
                       </span>
                       <span className="shrink-0 h-7 w-7 rounded-full bg-red-50 border border-red-200 text-red-500 flex items-center justify-center">
@@ -154,7 +155,8 @@ export default function BeforeAfter() {
                       <span className="shrink-0 h-9 w-9 rounded-xl bg-[#3FA98A]/10 border border-[#3FA98A]/30 text-[#2E8A6E] flex items-center justify-center">
                         <RowIcon className="h-4 w-4" strokeWidth={1.8} />
                       </span>
-                      <span className="flex-1 text-sm md:text-base text-ink font-medium leading-snug">
+                      {/* AFTER card row text */}
+                      <span className="flex-1 text-sm md:text-base text-black font-medium leading-snug">
                         {row.after}
                       </span>
                       <span className="shrink-0 h-7 w-7 rounded-full bg-[#3FA98A]/10 border border-[#3FA98A]/30 text-[#2E8A6E] flex items-center justify-center">

@@ -471,11 +471,6 @@ export default function Features() {
               {/* <ArrowUpRight className="relative h-6 w-6 sm:h-5 sm:w-5 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /> */}
             </button>
           </Reveal>
-          <Reveal delay={100}>
-            <p className="text-xs text-cream/40">
-              No credit card required · Setup within a few working days
-            </p>
-          </Reveal>
         </div>
       </div>
 
