@@ -446,30 +446,30 @@ export default function Features() {
         <div className="mt-10 md:mt-14 flex flex-col items-center gap-4">
           <Reveal>
             <button
-              onClick={open}
-              className="group relative inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 sm:px-10 sm:py-5 text-sm sm:text-base font-semibold text-[#F1E9FA] bg-gradient-to-r from-[#5D2E8C] to-[#7B4DB5] shadow-[0_10px_40px_rgba(93,46,140,0.55)] transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_14px_50px_rgba(93,46,140,0.7)] active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#B89ADC] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1E1C2F]"
+            onClick={open}
+            className="group relative inline-flex items-center justify-center gap-2 rounded-full px-8 py-4 sm:px-10 sm:py-5 text-sm sm:text-base font-semibold text-[#3A2E00] bg-gradient-to-r from-[#F5C518] to-[#FFDB4D] shadow-[0_10px_40px_rgba(245,197,24,0.55)] transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_14px_50px_rgba(245,197,24,0.7)] active:translate-y-0 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FFE985] focus-visible:ring-offset-2 focus-visible:ring-offset-[#1E1C2F]"
+          >
+            <span
+              className="absolute inset-0 rounded-full pointer-events-none cta-pulse"
+              style={{ backgroundColor: "#FFDB4D" }}
+              aria-hidden="true"
+            />
+
+            {/* Shine sweep */}
+            <span
+              className="absolute inset-0 rounded-full pointer-events-none overflow-hidden"
+              aria-hidden="true"
             >
-              <span
-                className="absolute inset-0 rounded-full pointer-events-none cta-pulse"
-                style={{ backgroundColor: "#7B4DB5" }}
-                aria-hidden="true"
-              />
+              <span className="shine-sweep absolute top-0 left-0 h-full w-1/3 -skew-x-12" />
+            </span>
 
-              {/* Shine sweep */}
-              <span
-                className="absolute inset-0 rounded-full pointer-events-none overflow-hidden"
-                aria-hidden="true"
-              >
-                <span className="shine-sweep absolute top-0 left-0 h-full w-1/3 -skew-x-12" />
-              </span>
-
-              <span
-                className="relative font-bold text-lg text-glow"
-              >
-                Book Your Free Demo
-              </span>
-              {/* <ArrowUpRight className="relative h-6 w-6 sm:h-5 sm:w-5 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /> */}
-            </button>
+            <span
+              className="relative font-bold text-lg text-glow"
+            >
+              Book Your Free Demo
+            </span>
+            {/* <ArrowUpRight className="relative h-6 w-6 sm:h-5 sm:w-5 shrink-0 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /> */}
+          </button>
           </Reveal>
         </div>
       </div>
