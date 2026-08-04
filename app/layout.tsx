@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { FormModalProvider } from "../components/FormModalContext";
 import ConsultationForm from "@/components/Form";
+import MetaPixel from "@/components/MetaPixel";
 
 const satoshi = localFont({
   src: [
@@ -46,6 +47,7 @@ export default function RootLayout({
       <body
         className={`${satoshi.variable} ${jakarta.variable} ${plexMono.variable} font-body bg-ink antialiased`}
       >
+        <MetaPixel />
         <FormModalProvider>
           {children}
           <ConsultationForm />
