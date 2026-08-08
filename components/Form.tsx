@@ -9,6 +9,11 @@ import { useFormModal } from "./FormModalContext";
 // 👇 paste your Apps Script deployment URL here
 const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbxLJS5OkHXk_f0ic8pUIp184yzQh2kFZK9Wd3b_A_JcJigJQKW0K4L5vKgGvgksHmpL/exec";
 
+// 👇 WhatsApp redirect target
+const WHATSAPP_NUMBER = "919899669649"; // country code + number, no + or spaces
+const WHATSAPP_MESSAGE = "Hi, I need a custom LMS for my business.";
+const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_MESSAGE)}`;
+
 type Status = "idle" | "submitting" | "success" | "error";
 type FormState = { name: string; phone: string; email: string; bestTimeToCall: string; message: string };
 type FormErrors = Partial<Record<keyof FormState, string>>;
@@ -121,10 +126,10 @@ export default function ConsultationForm() {
             setForm({ name: "", phone: "", email: "", bestTimeToCall: "", message: "" });
             setTouched({});
 
+            // Redirect to WhatsApp after a short pause so the person sees the success state.
             setTimeout(() => {
-                setStatus("idle");
-                close();
-            }, 2000);
+                window.location.href = WHATSAPP_URL;
+            }, 1200);
         } catch (err) {
             console.error(err);
             setStatus("error");
@@ -179,7 +184,7 @@ export default function ConsultationForm() {
                             >
                                 <CheckCircle2 className="h-10 w-10" style={{ color: "#B89ADC" }} />
                                 <p className="font-display text-lg" style={{ color: "#F1E9FA" }}>
-                                    Thanks! We&apos;ll be in touch shortly.
+                                    Thanks! Redirecting you to WhatsApp&hellip;
                                 </p>
                             </div>
                         ) : (

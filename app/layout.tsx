@@ -5,6 +5,9 @@ import "./globals.css";
 import { FormModalProvider } from "../components/FormModalContext";
 import ConsultationForm from "@/components/Form";
 import MetaPixel from "@/components/MetaPixel";
+import HeadTagManager from "@/components/HeadTagManger";
+import BodyTagManager from "@/components/BodyTagManager";
+import WhatsAppButton from "@/components/Whatsappbutton";
 
 const satoshi = localFont({
   src: [
@@ -44,13 +47,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <HeadTagManager />
+      </head>
       <body
         className={`${satoshi.variable} ${jakarta.variable} ${plexMono.variable} font-body bg-ink antialiased`}
-      >
+      > <BodyTagManager />
         <MetaPixel />
         <FormModalProvider>
           {children}
           <ConsultationForm />
+          <WhatsAppButton />
         </FormModalProvider>
       </body>
     </html>

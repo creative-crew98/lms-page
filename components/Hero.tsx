@@ -298,18 +298,18 @@ export default function Hero() {
             color: "#F1E9FA",
             fontWeight: 600,
           }}
-          className={`font-display  mt-10  text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[1] sm:leading-[1.05] text-balance transition-all duration-75 will-change-transform ${mounted ? "opacity-100" : "opacity-0"
+          className={`font-display mt-10 text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[1] sm:leading-[1.05] text-balance transition-all duration-75 will-change-transform ${mounted ? "opacity-100" : "opacity-0"
             }`}
         >
-          <span style={{ color: "#FFD84D" }}>Automate</span> Entire Coaching
-          With One
+          <span style={{ color: "#FFD84D" }}>Automate</span> Entire Coaching With
+          One{" "}
           <span
-            className="relative inline-block text-md sm:text-3xl md:text-4xl lg:text-7xl align-middle"
+            className="relative text-3xl sm:text-5xl md:text-6xl  inline-block align-middle"
             style={{ color: "#FFD84D" }}
           >
-            Managment System
+            Management System
             <svg
-              className="absolute left-0 -bottom-1. sm:-bottom-2 w-full overflow-visible"
+              className="absolute left-0 -bottom-1 sm:-bottom-2 w-full overflow-visible"
               height="16"
               viewBox="0 0 300 16"
               preserveAspectRatio="none"
@@ -322,7 +322,8 @@ export default function Hero() {
                 strokeLinecap="round"
                 fill="none"
                 pathLength="1"
-                className={`headline-underline ${mounted ? "headline-underline--looping" : ""}`}
+                className={`headline-underline ${mounted ? "headline-underline--looping" : ""
+                  }`}
               />
             </svg>
           </span>
