@@ -8,7 +8,7 @@ import { useFormModal } from "./FormModalContext";
 import { answerCategory, buildLeadSignals, trackLmsEvent } from "./leadTracking";
 
 // 👇 paste your Apps Script deployment URL here
-const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbxLJS5OkHXk_f0ic8pUIp184yzQh2kFZK9Wd3b_A_JcJigJQKW0K4L5vKgGvgksHmpL/exec";
+const GOOGLE_SHEET_ENDPOINT = "/api/leads";
 
 // 👇 WhatsApp redirect target
 const WHATSAPP_NUMBER = "919899669649"; // country code + number, no + or spaces
@@ -170,6 +170,7 @@ function validate(form: FormState): FormErrors {
 export default function ConsultationForm() {
     const { isOpen, close } = useFormModal();
     const [status, setStatus] = useState<Status>("idle");
+    const [submissionError, setSubmissionError] = useState("");
     const [form, setForm] = useState<FormState>({ name: "", phone: "", email: "", bestTimeToCall: "", message: "" });
     const [errors, setErrors] = useState<FormErrors>({});
     const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
@@ -271,16 +272,15 @@ export default function ConsultationForm() {
         if (Object.keys(validationErrors).length > 0) return;
 
         setStatus("submitting");
+        setSubmissionError("");
         const signals = buildLeadSignals(answers);
         if (!eventIdRef.current) eventIdRef.current = `lms_lead_${crypto.randomUUID()}`;
         const eventId = eventIdRef.current;
 
         try {
-            // no-cors is required for Apps Script web apps from the browser
-            await fetch(GOOGLE_SHEET_ENDPOINT, {
+            const response = await fetch(GOOGLE_SHEET_ENDPOINT, {
                 method: "POST",
-                mode: "no-cors",
-                headers: { "Content-Type": "text/plain" },
+                headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     ...form,
                     eventId,
@@ -288,14 +288,18 @@ export default function ConsultationForm() {
                     leadScore: signals.lead_score,
                     answers,
                     ...answers,
-                    // Keep the existing Sheet's message column compatible.
-                    message: [form.message, ...QUESTIONS.map((item) =>
-                        `${item.title}: ${answers[item.id] || "Skipped"}`
-                    )].filter(Boolean).join("\n"),
                 }),
             });
 
-            // Submission signal: the existing no-cors webhook cannot confirm a Sheet save.
+            if (!response.headers.get("content-type")?.includes("application/json")) {
+                throw new Error("The form service is unavailable. Please try again later.");
+            }
+            const result = await response.json();
+            if (!response.ok || result.success !== true) {
+                throw new Error(result.error || "The form could not be saved.");
+            }
+
+            // Only track a lead after the Sheet confirms the save.
             trackLmsEvent("Lead", signals, false, eventId);
             trackLmsEvent(`LMSLead_${signals.lead_segment}`, signals, true, `segment_${eventId}`);
             if (signals.lead_segment === "hot") {
@@ -313,6 +317,7 @@ export default function ConsultationForm() {
             }, 1200);
         } catch (err) {
             console.error(err);
+            setSubmissionError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
             setStatus("error");
         }
     };
@@ -546,7 +551,7 @@ export default function ConsultationForm() {
                                             role="alert"
                                         >
                                             <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                                            Something went wrong. Please try again.
+                                            {submissionError || "Something went wrong. Please try again."}
                                         </p>
                                     )}
                                 </form>
