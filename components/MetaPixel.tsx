@@ -19,18 +19,21 @@ export default function MetaPixel() {
           s.parentNode.insertBefore(t,s)}(window, document,'script',
           'https://connect.facebook.net/en_US/fbevents.js');
           fbq('init', '${PIXEL_ID}');
-          fbq('track', 'PageView');
+          fbq('trackSingle', '${PIXEL_ID}', 'PageView');
+          var queued = window.__lmsMetaQueue || [];
+          window.__lmsMetaQueue = [];
+          queued.forEach(function(event) {
+            var args = [event.custom ? 'trackSingleCustom' : 'trackSingle', '${PIXEL_ID}', event.name, event.params];
+            if (event.eventId) args.push({eventID: event.eventId});
+            fbq.apply(null, args);
+          });
         `}
       </Script>
-      <noscript>
-        <img
-          height="1"
-          width="1"
-          style={{ display: "none" }}
-          src={`https://www.facebook.com/tr?id=${PIXEL_ID}&ev=PageView&noscript=1`}
-          alt=""
-        />
-      </noscript>
+      {/* Raw fallback markup prevents React from preloading an image
+          that browsers use only when JavaScript is disabled. */}
+      <noscript dangerouslySetInnerHTML={{
+        __html: `<img height="1" width="1" style="display:none" src="https://www.facebook.com/tr?id=${PIXEL_ID}&amp;ev=PageView&amp;noscript=1" alt="" />`,
+      }} />
     </>
   );
 }

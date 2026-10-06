@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useFormModal } from "./FormModalContext";
+import { answerCategory, buildLeadSignals, trackLmsEvent } from "./leadTracking";
 
 // 👇 paste your Apps Script deployment URL here
 const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbxLJS5OkHXk_f0ic8pUIp184yzQh2kFZK9Wd3b_A_JcJigJQKW0K4L5vKgGvgksHmpL/exec";
@@ -13,6 +14,113 @@ const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbxLJS5OkH
 const WHATSAPP_NUMBER = "919899669649"; // country code + number, no + or spaces
 const WHATSAPP_MESSAGE = "Hi, I need a custom LMS for my business.";
 const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_MESSAGE)}`;
+
+const QUESTIONS = [
+  {
+    "id": "role",
+    "title": "Which of these best describes you?",
+    "required": true,
+    "options": [
+      "Coaching / Institute Owner",
+      "Educator / Teacher",
+      "Online Course Creator",
+      "Trainer / Mentor",
+      "EdTech Business Owner",
+      "Other"
+    ]
+  },
+  {
+    "id": "currentLms",
+    "title": "Do you currently use an LMS for your courses or students?",
+    "required": true,
+    "options": [
+      "Yes, we already use an LMS",
+      "No, we manage everything manually",
+      "We use basic tools like WhatsApp/Google Drive",
+      "We are planning to launch an LMS"
+    ]
+  },
+  {
+    "id": "challenge",
+    "title": "What is the #1 challenge you currently face in managing your students/courses?",
+    "required": true,
+    "options": [
+      "Student management",
+      "Course/content management",
+      "Online assessments & exams",
+      "Tracking student performance",
+      "Attendance & engagement",
+      "Payments & subscriptions",
+      "Too many tools/platforms",
+      "Other"
+    ]
+  },
+  {
+    "id": "goal",
+    "title": "What would you primarily like an LMS to help you achieve?",
+    "required": false,
+    "options": [
+      "Manage courses in one place",
+      "Automate student management",
+      "Track student progress & performance",
+      "Conduct tests & assessments",
+      "Improve student engagement",
+      "Sell courses online",
+      "Scale my coaching/institute"
+    ]
+  },
+  {
+    "id": "studentCount",
+    "title": "Approximately how many students do you currently manage?",
+    "required": true,
+    "options": [
+      "1–100",
+      "101–500",
+      "501–1,000",
+      "1,000–5,000",
+      "5,000+"
+    ]
+  },
+  {
+    "id": "courseType",
+    "title": "What type of courses/training do you offer?",
+    "required": true,
+    "options": [
+      "Academic / Coaching",
+      "Professional Training",
+      "Skill Development",
+      "Competitive Exam Preparation",
+      "Corporate Training",
+      "Online Courses",
+      "Other"
+    ]
+  },
+  {
+    "id": "priority",
+    "title": "What is your biggest priority right now?",
+    "required": true,
+    "options": [
+      "Reduce manual work",
+      "Improve student experience",
+      "Increase course enrollments",
+      "Automate operations",
+      "Track student performance",
+      "Scale my institute/business"
+    ]
+  },
+  {
+    "id": "implementationTimeline",
+    "title": "When are you planning to implement an LMS?",
+    "required": true,
+    "options": [
+      "Immediately",
+      "Within 1 month",
+      "Within 3 months",
+      "Within 6 months",
+      "Just exploring options"
+    ]
+  }
+];
 
 type Status = "idle" | "submitting" | "success" | "error";
 type FormState = { name: string; phone: string; email: string; bestTimeToCall: string; message: string };
@@ -65,6 +173,25 @@ export default function ConsultationForm() {
     const [form, setForm] = useState<FormState>({ name: "", phone: "", email: "", bestTimeToCall: "", message: "" });
     const [errors, setErrors] = useState<FormErrors>({});
     const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
+    const [step, setStep] = useState(0);
+    const [answers, setAnswers] = useState<Record<string, string>>({});
+    const [questionError, setQuestionError] = useState("");
+    const questionRef = useRef<HTMLHeadingElement>(null);
+    const modalRef = useRef<HTMLDivElement>(null);
+    const eventIdRef = useRef<string | null>(null);
+    const startedRef = useRef(false);
+    const question = QUESTIONS[step];
+    const onContactStep = step === QUESTIONS.length;
+    useEffect(() => {
+        if (!isOpen) return;
+        if (!startedRef.current) {
+            startedRef.current = true;
+            trackLmsEvent("LMSQuizStart", { content_name: "lms_consultation", total_questions: QUESTIONS.length });
+        }
+        modalRef.current?.scrollTo({ top: 0, behavior: "instant" });
+        if (onContactStep) firstFieldRef.current?.focus({ preventScroll: true });
+        else questionRef.current?.focus({ preventScroll: true });
+    }, [step, isOpen, onContactStep]);
     const firstFieldRef = useRef<HTMLInputElement>(null);
 
     // focus the first field when the modal opens, and reset state when it closes
@@ -74,9 +201,19 @@ export default function ConsultationForm() {
             return () => clearTimeout(t);
         } else {
             setStatus("idle");
+            setStep(0);
+            setQuestionError("");
             setErrors({});
             setTouched({});
         }
+    }, [isOpen]);
+
+    // Keep scrolling inside the modal while it is open.
+    useEffect(() => {
+        if (!isOpen) return;
+        const previousOverflow = document.body.style.overflow;
+        document.body.style.overflow = "hidden";
+        return () => { document.body.style.overflow = previousOverflow; };
     }, [isOpen]);
 
     // close on Escape (but not mid-submit, so an in-flight request isn't silently lost)
@@ -105,6 +242,28 @@ export default function ConsultationForm() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (status === "submitting") return;
+        if (!onContactStep) {
+            if (question.required && !answers[question.id]) {
+                setQuestionError("Please select an answer to continue.");
+                return;
+            }
+            setQuestionError("");
+            trackLmsEvent("LMSQuizStep", {
+                question_id: question.id,
+                step: step + 1,
+                answer: answerCategory(answers[question.id]),
+                content_name: "lms_consultation",
+            });
+            setStep((current) => current + 1);
+            return;
+        }
+        const missingQuestion = QUESTIONS.findIndex((item) => item.required && !answers[item.id]);
+        if (missingQuestion >= 0) {
+            setStep(missingQuestion);
+            setQuestionError("Please answer this question before submitting.");
+            return;
+        }
 
         const validationErrors = validate(form);
         setErrors(validationErrors);
@@ -112,6 +271,9 @@ export default function ConsultationForm() {
         if (Object.keys(validationErrors).length > 0) return;
 
         setStatus("submitting");
+        const signals = buildLeadSignals(answers);
+        if (!eventIdRef.current) eventIdRef.current = `lms_lead_${crypto.randomUUID()}`;
+        const eventId = eventIdRef.current;
 
         try {
             // no-cors is required for Apps Script web apps from the browser
@@ -119,12 +281,31 @@ export default function ConsultationForm() {
                 method: "POST",
                 mode: "no-cors",
                 headers: { "Content-Type": "text/plain" },
-                body: JSON.stringify(form),
+                body: JSON.stringify({
+                    ...form,
+                    eventId,
+                    leadSegment: signals.lead_segment,
+                    leadScore: signals.lead_score,
+                    answers,
+                    ...answers,
+                    // Keep the existing Sheet's message column compatible.
+                    message: [form.message, ...QUESTIONS.map((item) =>
+                        `${item.title}: ${answers[item.id] || "Skipped"}`
+                    )].filter(Boolean).join("\n"),
+                }),
             });
 
+            // Submission signal: the existing no-cors webhook cannot confirm a Sheet save.
+            trackLmsEvent("Lead", signals, false, eventId);
+            trackLmsEvent(`LMSLead_${signals.lead_segment}`, signals, true, `segment_${eventId}`);
+            if (signals.lead_segment === "hot") {
+                trackLmsEvent("LMSHighIntentLead", signals, true, `intent_${eventId}`);
+            }
+            eventIdRef.current = null;
             setStatus("success");
             setForm({ name: "", phone: "", email: "", bestTimeToCall: "", message: "" });
             setTouched({});
+            setAnswers({});
 
             // Redirect to WhatsApp after a short pause so the person sees the success state.
             setTimeout(() => {
@@ -146,7 +327,7 @@ export default function ConsultationForm() {
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    className="fixed inset-0 z-50 flex items-center justify-center px-4"
+                    className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden p-3 sm:p-4"
                     style={{ backgroundColor: "rgba(10,6,18,0.75)", backdropFilter: "blur(4px)" }}
                     onClick={() => status !== "submitting" && close()}
                     role="dialog"
@@ -159,7 +340,8 @@ export default function ConsultationForm() {
                         exit={{ opacity: 0, y: 12, scale: 0.97 }}
                         transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
                         onClick={(e) => e.stopPropagation()}
-                        className="relative w-full max-w-md rounded-2xl p-6 sm:p-8"
+                        ref={modalRef}
+                        className="relative w-full min-w-0 max-w-md max-h-[calc(100dvh-1.5rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl p-4 sm:p-8"
                         style={{
                             backgroundColor: "#241934",
                             border: "1px solid rgba(184,154,220,0.15)",
@@ -186,6 +368,9 @@ export default function ConsultationForm() {
                                 <p className="font-display text-lg" style={{ color: "#F1E9FA" }}>
                                     Thanks! Redirecting you to WhatsApp&hellip;
                                 </p>
+                                <a href={WHATSAPP_URL} className="mt-2 rounded-full bg-[#7B4DB5] px-6 py-3 text-sm font-semibold text-white">
+                                    Open WhatsApp
+                                </a>
                             </div>
                         ) : (
                             <>
@@ -200,7 +385,28 @@ export default function ConsultationForm() {
                                     Tell us a bit about your coaching business.
                                 </p>
 
-                                <form onSubmit={handleSubmit} noValidate className="mt-6 flex flex-col gap-4">
+                                <form onSubmit={handleSubmit} noValidate className="mt-6 flex min-w-0 flex-col gap-4">
+                                    <p className="text-xs text-[#B89ADC]" aria-live="polite">
+                                        {onContactStep ? "Final step: Your contact details" : `Question ${step + 1} of ${QUESTIONS.length}`}
+                                    </p>
+                                    {!onContactStep ? (
+                                        <>
+                                            <h4 ref={questionRef} tabIndex={-1} className="text-lg font-semibold text-white outline-none" id="lms-question">
+                                                {question.title}{question.required ? " *" : " (optional)"}
+                                            </h4>
+                                            <fieldset aria-labelledby="lms-question" className="flex min-w-0 flex-col gap-2">
+                                                {question.options.map((option) => (
+                                                    <label key={option} className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm text-white" style={{ borderColor: answers[question.id] === option ? "#B89ADC" : "rgba(184,154,220,0.2)" }}>
+                                                        <input type="radio" name={question.id} value={option} checked={answers[question.id] === option} onChange={() => { setAnswers((previous) => ({ ...previous, [question.id]: option })); setQuestionError(""); }} className="shrink-0 accent-[#B89ADC]" />
+                                                        <span className="min-w-0 break-words">{option}</span>
+                                                    </label>
+                                                ))}
+                                            </fieldset>
+                                            {questionError && <p role="alert" className="text-sm text-red-400">{questionError}</p>}
+                                        </>
+                                    ) : (
+                                        <>
+
                                     <div>
                                         <input
                                             ref={firstFieldRef}
@@ -315,6 +521,9 @@ export default function ConsultationForm() {
                                         style={inputStyle}
                                     />
 
+                                        </>
+                                    )}
+                                    {step > 0 && <button type="button" disabled={status === "submitting"} onClick={() => { setStep((current) => current - 1); setQuestionError(""); }} className="text-left text-sm text-[#B89ADC] disabled:opacity-50">Back</button>}
                                     <button
                                         type="submit"
                                         disabled={status === "submitting"}
@@ -326,7 +535,7 @@ export default function ConsultationForm() {
                                                 Submitting...
                                             </>
                                         ) : (
-                                            "Submit"
+                                            onContactStep ? "Submit" : "Continue"
                                         )}
                                     </button>
 

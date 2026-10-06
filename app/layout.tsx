@@ -51,6 +51,7 @@ export default function RootLayout({
         <HeadTagManager />
       </head>
       <body
+        suppressHydrationWarning
         className={`${satoshi.variable} ${jakarta.variable} ${plexMono.variable} font-body bg-ink antialiased`}
       > <BodyTagManager />
         <MetaPixel />
