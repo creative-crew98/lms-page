@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { FormModalProvider } from "../components/FormModalContext";
 import ConsultationForm from "@/components/Form";
+import DeploymentRefresh from "@/components/DeploymentRefresh";
 import MetaPixel from "@/components/MetaPixel";
 import HeadTagManager from "@/components/HeadTagManger";
 import BodyTagManager from "@/components/BodyTagManager";
@@ -54,6 +55,7 @@ export default function RootLayout({
         suppressHydrationWarning
         className={`${satoshi.variable} ${jakarta.variable} ${plexMono.variable} font-body bg-ink antialiased`}
       > <BodyTagManager />
+        <DeploymentRefresh />
         <MetaPixel />
         <FormModalProvider>
           {children}
