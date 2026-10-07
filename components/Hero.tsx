@@ -304,37 +304,19 @@ export default function Hero() {
           <span style={{ color: "#FFD84D" }}>Automate</span> Entire Coaching With
           One{" "}
           <span
-            className="relative text-3xl sm:text-5xl md:text-6xl  inline-block align-middle"
+            className="relative sm:mt-0 text-3xl sm:text-5xl md:text-6xl lg:text-7xl inline-block align-baseline"
             style={{ color: "#FFD84D" }}
           >
             Management System
-            <svg
-              className="absolute left-0 -bottom-1 sm:-bottom-2 w-full overflow-visible"
-              height="16"
-              viewBox="0 0 300 16"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M2 8 C 40 -2, 80 18, 120 8 C 160 -2, 200 18, 240 8 C 265 3, 285 12, 298 6"
-                stroke="#B89ADC"
-                strokeWidth="8"
-                strokeLinecap="round"
-                fill="none"
-                pathLength="1"
-                className={`headline-underline ${mounted ? "headline-underline--looping" : ""
-                  }`}
-              />
-            </svg>
           </span>
         </h1>
 
         <div
-          className={`mt-7 sm:mt-6 flex flex-col items-center justify-center transition-all duration-700 delay-100 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
+          className={`mt-5 sm:mt-6 flex flex-col items-center justify-center transition-all duration-700 delay-100 ${mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"
             }`}
         >
           <span
-            className="font-display text-lg sm:text-2xl md:text-3xl"
+            className="font-display font-bold capitalize text-[20px] sm:text-2xl md:text-3xl"
             style={{ color: "rgba(241,233,250,0.75)" }}
           >
             Turn your coaching business into a

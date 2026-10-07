@@ -8,7 +8,7 @@ import { useFormModal } from "./FormModalContext";
 import { answerCategory, buildLeadSignals, trackLmsEvent } from "./leadTracking";
 
 // 👇 paste your Apps Script deployment URL here
-const GOOGLE_SHEET_ENDPOINT = "/api/leads";
+const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbwGA2mhBVjD_n5rWy6-4Y_jzcgRbxCzIbOz6W2dYkDcv9xCnJYqPkG4UZILP-gzBYmF/exec";
 
 // 👇 WhatsApp redirect target
 const WHATSAPP_NUMBER = "919899669649"; // country code + number, no + or spaces
@@ -58,7 +58,7 @@ const QUESTIONS = [
   {
     "id": "goal",
     "title": "What would you primarily like an LMS to help you achieve?",
-    "required": false,
+    "required": true,
     "options": [
       "Manage courses in one place",
       "Automate student management",
@@ -123,20 +123,11 @@ const QUESTIONS = [
 ];
 
 type Status = "idle" | "submitting" | "success" | "error";
-type FormState = { name: string; phone: string; email: string; bestTimeToCall: string; message: string };
+type FormState = { name: string; phone: string; email: string; message: string };
 type FormErrors = Partial<Record<keyof FormState, string>>;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^[+]?[\d\s\-().]{7,15}$/;
-
-// 9 AM – 7 PM, in 2-hour call windows.
-const CALL_TIME_SLOTS = [
-    "9:00 AM - 11:00 AM",
-    "11:00 AM - 1:00 PM",
-    "1:00 PM - 3:00 PM",
-    "3:00 PM - 5:00 PM",
-    "5:00 PM - 7:00 PM",
-];
 
 const inputStyle = {
     backgroundColor: "rgba(43,27,61,0.6)",
@@ -163,7 +154,6 @@ function validate(form: FormState): FormErrors {
     } else if (!EMAIL_RE.test(form.email.trim())) {
         errors.email = "That doesn't look like a valid email.";
     }
-    // bestTimeToCall is optional — no validation.
     return errors;
 }
 
@@ -171,10 +161,10 @@ export default function ConsultationForm() {
     const { isOpen, close } = useFormModal();
     const [status, setStatus] = useState<Status>("idle");
     const [submissionError, setSubmissionError] = useState("");
-    const [form, setForm] = useState<FormState>({ name: "", phone: "", email: "", bestTimeToCall: "", message: "" });
+    const [form, setForm] = useState<FormState>({ name: "", phone: "", email: "", message: "" });
     const [errors, setErrors] = useState<FormErrors>({});
     const [touched, setTouched] = useState<Partial<Record<keyof FormState, boolean>>>({});
-    const [step, setStep] = useState(0);
+    const [step, setStep] = useState(-1);
     const [answers, setAnswers] = useState<Record<string, string>>({});
     const [questionError, setQuestionError] = useState("");
     const questionRef = useRef<HTMLHeadingElement>(null);
@@ -182,7 +172,8 @@ export default function ConsultationForm() {
     const eventIdRef = useRef<string | null>(null);
     const startedRef = useRef(false);
     const question = QUESTIONS[step];
-    const onContactStep = step === QUESTIONS.length;
+    const [whatsappUrl, setWhatsappUrl] = useState(WHATSAPP_URL);
+    const onContactStep = step === -1;
     useEffect(() => {
         if (!isOpen) return;
         if (!startedRef.current) {
@@ -202,7 +193,7 @@ export default function ConsultationForm() {
             return () => clearTimeout(t);
         } else {
             setStatus("idle");
-            setStep(0);
+            setStep(-1);
             setQuestionError("");
             setErrors({});
             setTouched({});
@@ -244,7 +235,16 @@ export default function ConsultationForm() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (status === "submitting") return;
-        if (!onContactStep) {
+        if (onContactStep) {
+            const validationErrors = validate(form);
+            setErrors(validationErrors);
+            setTouched({ name: true, phone: true, email: true, message: true });
+            if (Object.keys(validationErrors).length > 0) return;
+            setStatus("idle");
+            setStep(0);
+            return;
+        }
+        {
             if (question.required && !answers[question.id]) {
                 setQuestionError("Please select an answer to continue.");
                 return;
@@ -256,8 +256,11 @@ export default function ConsultationForm() {
                 answer: answerCategory(answers[question.id]),
                 content_name: "lms_consultation",
             });
-            setStep((current) => current + 1);
-            return;
+            if (step < QUESTIONS.length - 1) {
+                setStatus("idle");
+                setStep((current) => current + 1);
+                return;
+            }
         }
         const missingQuestion = QUESTIONS.findIndex((item) => item.required && !answers[item.id]);
         if (missingQuestion >= 0) {
@@ -268,8 +271,11 @@ export default function ConsultationForm() {
 
         const validationErrors = validate(form);
         setErrors(validationErrors);
-        setTouched({ name: true, phone: true, email: true, bestTimeToCall: true, message: true });
-        if (Object.keys(validationErrors).length > 0) return;
+        setTouched({ name: true, phone: true, email: true, message: true });
+        if (Object.keys(validationErrors).length > 0) {
+            setStep(-1);
+            return;
+        }
 
         setStatus("submitting");
         setSubmissionError("");
@@ -280,7 +286,8 @@ export default function ConsultationForm() {
         try {
             const response = await fetch(GOOGLE_SHEET_ENDPOINT, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
+                // A simple CORS request avoids Apps Script's unsupported OPTIONS preflight.
+                headers: { "Content-Type": "text/plain;charset=UTF-8" },
                 body: JSON.stringify({
                     ...form,
                     eventId,
@@ -306,14 +313,25 @@ export default function ConsultationForm() {
                 trackLmsEvent("LMSHighIntentLead", signals, true, `intent_${eventId}`);
             }
             eventIdRef.current = null;
+            const message = [
+                WHATSAPP_MESSAGE,
+                `Name: ${form.name.trim()}`,
+                `Phone: ${form.phone.trim()}`,
+                `Email: ${form.email.trim()}`,
+                ...(form.message.trim() ? [`Automation needs: ${form.message.trim()}`] : []),
+                "",
+                ...QUESTIONS.map((item) => `${item.title}\n${answers[item.id]}`),
+            ].join("\n");
+            const redirectUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+            setWhatsappUrl(redirectUrl);
             setStatus("success");
-            setForm({ name: "", phone: "", email: "", bestTimeToCall: "", message: "" });
+            setForm({ name: "", phone: "", email: "", message: "" });
             setTouched({});
             setAnswers({});
 
             // Redirect to WhatsApp after a short pause so the person sees the success state.
             setTimeout(() => {
-                window.location.href = WHATSAPP_URL;
+                window.location.href = redirectUrl;
             }, 1200);
         } catch (err) {
             console.error(err);
@@ -373,7 +391,7 @@ export default function ConsultationForm() {
                                 <p className="font-display text-lg" style={{ color: "#F1E9FA" }}>
                                     Thanks! Redirecting you to WhatsApp&hellip;
                                 </p>
-                                <a href={WHATSAPP_URL} className="mt-2 rounded-full bg-[#7B4DB5] px-6 py-3 text-sm font-semibold text-white">
+                                <a href={whatsappUrl} className="mt-2 rounded-full bg-[#7B4DB5] px-6 py-3 text-sm font-semibold text-white">
                                     Open WhatsApp
                                 </a>
                             </div>
@@ -392,7 +410,7 @@ export default function ConsultationForm() {
 
                                 <form onSubmit={handleSubmit} noValidate className="mt-6 flex min-w-0 flex-col gap-4">
                                     <p className="text-xs text-[#B89ADC]" aria-live="polite">
-                                        {onContactStep ? "Final step: Your contact details" : `Question ${step + 1} of ${QUESTIONS.length}`}
+                                        {onContactStep ? "Step 1: Your contact details" : `Question ${step + 1} of ${QUESTIONS.length}`}
                                     </p>
                                     {!onContactStep ? (
                                         <>
@@ -484,36 +502,6 @@ export default function ConsultationForm() {
                                         )}
                                     </div>
 
-                                    <div>
-                                        <label
-                                            htmlFor="bestTimeToCall"
-                                            className="mb-1.5 block text-xs"
-                                            style={{ color: "rgba(241,233,250,0.6)" }}
-                                        >
-                                            Best time to call (9 AM – 7 PM)
-                                        </label>
-                                        <select
-                                            id="bestTimeToCall"
-                                            name="bestTimeToCall"
-                                            value={form.bestTimeToCall}
-                                            onChange={handleChange}
-                                            onBlur={handleBlur}
-                                            aria-label="Best time to call"
-                                            disabled={status === "submitting"}
-                                            className={fieldClass("bestTimeToCall")}
-                                            style={inputStyle}
-                                        >
-                                            <option value="" style={{ color: "#1E1C2F" }}>
-                                                Select a time slot (optional)
-                                            </option>
-                                            {CALL_TIME_SLOTS.map((slot) => (
-                                                <option key={slot} value={slot} style={{ color: "#1E1C2F" }}>
-                                                    {slot}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-
                                     <textarea
                                         name="message"
                                         value={form.message}
@@ -528,7 +516,7 @@ export default function ConsultationForm() {
 
                                         </>
                                     )}
-                                    {step > 0 && <button type="button" disabled={status === "submitting"} onClick={() => { setStep((current) => current - 1); setQuestionError(""); }} className="text-left text-sm text-[#B89ADC] disabled:opacity-50">Back</button>}
+                                    {!onContactStep && <button type="button" disabled={status === "submitting"} onClick={() => { setStep((current) => current - 1); setQuestionError(""); }} className="text-left text-sm text-[#B89ADC] disabled:opacity-50">Back</button>}
                                     <button
                                         type="submit"
                                         disabled={status === "submitting"}
@@ -540,7 +528,7 @@ export default function ConsultationForm() {
                                                 Submitting...
                                             </>
                                         ) : (
-                                            onContactStep ? "Submit" : "Continue"
+                                            onContactStep ? "Submit" : step === QUESTIONS.length - 1 ? "Submit & open WhatsApp" : "Continue"
                                         )}
                                     </button>
 
