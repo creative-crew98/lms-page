@@ -1,0 +1,9 @@
+# Revalidate entry pages so browsers do not keep an old booking form after deployment.
+<IfModule mod_headers.c>
+    <FilesMatch "\.(html|txt)$">
+        Header always set Cache-Control "no-cache, max-age=0, must-revalidate"
+    </FilesMatch>
+    <FilesMatch "\.(js|css|woff2?|png|jpe?g|svg|webp|ico)$">
+        Header set Cache-Control "public, max-age=0, must-revalidate"
+    </FilesMatch>
+</IfModule>
