@@ -20,3 +20,11 @@
     ExpiresByType text/html "access plus 0 seconds"
     ExpiresByType text/plain "access plus 0 seconds"
 </IfModule>
+# Cache only the versioned Next.js static assets for a year.
+<IfModule mod_setenvif.c>
+    SetEnvIf Request_URI "^/_next/static/" LMS_VERSIONED_ASSET=1
+</IfModule>
+<IfModule mod_headers.c>
+    Header onsuccess unset Cache-Control env=LMS_VERSIONED_ASSET
+    Header always set Cache-Control "public, max-age=31536000, immutable" env=LMS_VERSIONED_ASSET
+</IfModule>

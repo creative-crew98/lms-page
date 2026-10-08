@@ -3,17 +3,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { X, Loader2, AlertCircle } from "lucide-react";
 import { useFormModal } from "./FormModalContext";
 import { answerCategory, buildLeadSignals, trackLmsEvent } from "./leadTracking";
+import ConsultationBooking from "./ConsultationBooking";
 
 // 👇 paste your Apps Script deployment URL here
-const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbwGA2mhBVjD_n5rWy6-4Y_jzcgRbxCzIbOz6W2dYkDcv9xCnJYqPkG4UZILP-gzBYmF/exec";
-
-// 👇 WhatsApp redirect target
-const WHATSAPP_NUMBER = "919899669649"; // country code + number, no + or spaces
-const WHATSAPP_MESSAGE = "Hi, I need a custom LMS for my business.";
-const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(WHATSAPP_MESSAGE)}`;
+const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzVOIf-0Jv5VMIO653kIWZmQvXETpTX2azPmWsDNSLixBJ151wKjxjkYCJtdQR9LDRj/exec";
 
 const QUESTIONS = [
   {
@@ -157,6 +153,18 @@ function validate(form: FormState): FormErrors {
     return errors;
 }
 
+async function saveLead(payload: Record<string, unknown>) {
+    const response = await fetch(GOOGLE_SHEET_ENDPOINT, {
+        signal: AbortSignal.timeout(20000),
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=UTF-8" },
+        body: JSON.stringify(payload),
+    });
+    if (!response.headers.get("content-type")?.includes("application/json")) throw new Error("The form service is unavailable. Please try again later.");
+    const result = await response.json();
+    if (!response.ok || result.success !== true) throw new Error(result.error || "The form could not be saved.");
+}
+
 export default function ConsultationForm() {
     const { isOpen, close } = useFormModal();
     const [status, setStatus] = useState<Status>("idle");
@@ -172,7 +180,9 @@ export default function ConsultationForm() {
     const eventIdRef = useRef<string | null>(null);
     const startedRef = useRef(false);
     const question = QUESTIONS[step];
-    const [whatsappUrl, setWhatsappUrl] = useState(WHATSAPP_URL);
+    const savingRef = useRef(false);
+    const completedRef = useRef(false);
+    const [bookingBusy, setBookingBusy] = useState(false);
     const onContactStep = step === -1;
     useEffect(() => {
         if (!isOpen) return;
@@ -186,12 +196,36 @@ export default function ConsultationForm() {
     }, [step, isOpen, onContactStep]);
     const firstFieldRef = useRef<HTMLInputElement>(null);
 
+    function ensureLeadId() {
+        if (!eventIdRef.current) eventIdRef.current = `lms_lead_${crypto.randomUUID()}`;
+        return eventIdRef.current;
+    }
+
+    // Persist partial contact details while the visitor is entering them. The
+    // server merges these updates into one row keyed by this browser session ID.
+    useEffect(() => {
+        if (!isOpen || !eventIdRef.current || !Object.values(form).some(value => value.trim())) return;
+        const timer = setTimeout(() => {
+            void saveLead({ ...form, eventId: eventIdRef.current, leadId: eventIdRef.current, action: "lead", submissionStage: "contact" }).catch(error => {
+                console.warn("Partial contact details could not be saved yet.", error);
+            });
+        }, 350);
+        return () => clearTimeout(timer);
+    }, [form, isOpen]);
+
     // focus the first field when the modal opens, and reset state when it closes
     useEffect(() => {
         if (isOpen) {
             const t = setTimeout(() => firstFieldRef.current?.focus(), 50);
             return () => clearTimeout(t);
         } else {
+            if (completedRef.current) {
+                completedRef.current = false;
+                setForm({ name: "", phone: "", email: "", message: "" });
+                setAnswers({});
+                eventIdRef.current = null;
+            }
+            startedRef.current = false;
             setStatus("idle");
             setStep(-1);
             setQuestionError("");
@@ -212,14 +246,15 @@ export default function ConsultationForm() {
     useEffect(() => {
         if (!isOpen) return;
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape" && status !== "submitting") close();
+            if (e.key === "Escape" && status !== "submitting" && !bookingBusy) close();
         };
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isOpen, status, close]);
+    }, [isOpen, status, bookingBusy, close]);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
+        if (value.trim()) ensureLeadId();
         setForm((prev) => ({ ...prev, [name]: value }));
         if (touched[name as keyof FormState]) {
             setErrors((prev) => ({ ...validate({ ...form, [name]: value }) }));
@@ -232,116 +267,59 @@ export default function ConsultationForm() {
         setErrors(validate(form));
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (status === "submitting") return;
-        if (onContactStep) {
-            const validationErrors = validate(form);
-            setErrors(validationErrors);
-            setTouched({ name: true, phone: true, email: true, message: true });
-            if (Object.keys(validationErrors).length > 0) return;
-            setStatus("idle");
-            setStep(0);
-            return;
-        }
-        {
-            if (question.required && !answers[question.id]) {
-                setQuestionError("Please select an answer to continue.");
-                return;
-            }
-            setQuestionError("");
-            trackLmsEvent("LMSQuizStep", {
-                question_id: question.id,
-                step: step + 1,
-                answer: answerCategory(answers[question.id]),
-                content_name: "lms_consultation",
-            });
-            if (step < QUESTIONS.length - 1) {
-                setStatus("idle");
-                setStep((current) => current + 1);
-                return;
-            }
-        }
-        const missingQuestion = QUESTIONS.findIndex((item) => item.required && !answers[item.id]);
-        if (missingQuestion >= 0) {
-            setStep(missingQuestion);
-            setQuestionError("Please answer this question before submitting.");
-            return;
-        }
-
+    async function submitCompleted(completedAnswers: Record<string, string>) {
+        if (savingRef.current) return;
+        const missing = QUESTIONS.findIndex(item => !completedAnswers[item.id]);
+        if (missing >= 0) { setStep(missing); setQuestionError("Please select an answer."); return; }
         const validationErrors = validate(form);
-        setErrors(validationErrors);
-        setTouched({ name: true, phone: true, email: true, message: true });
-        if (Object.keys(validationErrors).length > 0) {
-            setStep(-1);
-            return;
-        }
-
-        setStatus("submitting");
-        setSubmissionError("");
-        const signals = buildLeadSignals(answers);
+        if (Object.keys(validationErrors).length) { setErrors(validationErrors); setTouched({ name: true, phone: true, email: true }); setStep(-1); return; }
+        savingRef.current = true; setStatus("submitting"); setSubmissionError("");
+        const signals = buildLeadSignals(completedAnswers);
         if (!eventIdRef.current) eventIdRef.current = `lms_lead_${crypto.randomUUID()}`;
         const eventId = eventIdRef.current;
-
         try {
-            const response = await fetch(GOOGLE_SHEET_ENDPOINT, {
-                method: "POST",
-                // A simple CORS request avoids Apps Script's unsupported OPTIONS preflight.
-                headers: { "Content-Type": "text/plain;charset=UTF-8" },
-                body: JSON.stringify({
-                    ...form,
-                    eventId,
-                    leadSegment: signals.lead_segment,
-                    leadScore: signals.lead_score,
-                    answers,
-                    ...answers,
-                }),
-            });
-
-            if (!response.headers.get("content-type")?.includes("application/json")) {
-                throw new Error("The form service is unavailable. Please try again later.");
-            }
-            const result = await response.json();
-            if (!response.ok || result.success !== true) {
-                throw new Error(result.error || "The form could not be saved.");
-            }
-
-            // Only track a lead after the Sheet confirms the save.
-            trackLmsEvent("Lead", signals, false, eventId);
+            await saveLead({ ...form, eventId, leadId: eventId, action: "lead", submissionStage: "completed", leadSegment: signals.lead_segment, leadScore: signals.lead_score, answers: completedAnswers, ...completedAnswers });
+            trackLmsEvent("Lead", { ...signals, submission_stage: "completed" }, false, eventId);
+            trackLmsEvent("LMSQuizComplete", signals, true, `quiz_${eventId}`);
             trackLmsEvent(`LMSLead_${signals.lead_segment}`, signals, true, `segment_${eventId}`);
-            if (signals.lead_segment === "hot") {
-                trackLmsEvent("LMSHighIntentLead", signals, true, `intent_${eventId}`);
-            }
-            eventIdRef.current = null;
-            const message = [
-                WHATSAPP_MESSAGE,
-                `Name: ${form.name.trim()}`,
-                `Phone: ${form.phone.trim()}`,
-                `Email: ${form.email.trim()}`,
-                ...(form.message.trim() ? [`Automation needs: ${form.message.trim()}`] : []),
-                "",
-                ...QUESTIONS.map((item) => `${item.title}\n${answers[item.id]}`),
-            ].join("\n");
-            const redirectUrl = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
-            setWhatsappUrl(redirectUrl);
+            if (signals.lead_segment === "hot") trackLmsEvent("LMSHighIntentLead", signals, true, `intent_${eventId}`);
+            completedRef.current = true;
             setStatus("success");
-            setForm({ name: "", phone: "", email: "", message: "" });
-            setTouched({});
-            setAnswers({});
-
-            // Redirect to WhatsApp after a short pause so the person sees the success state.
-            setTimeout(() => {
-                window.location.href = redirectUrl;
-            }, 1200);
         } catch (err) {
-            console.error(err);
-            setSubmissionError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+            setSubmissionError(err instanceof Error ? err.message : "Your answers could not be saved. Please try again.");
             setStatus("error");
-        }
+        } finally { savingRef.current = false; }
+    }
+
+    const chooseAnswer = async (option: string) => {
+        if (savingRef.current || !question) return;
+        const nextAnswers = { ...answers, [question.id]: option };
+        setAnswers(nextAnswers); setQuestionError(""); setSubmissionError("");
+        if (step === QUESTIONS.length - 1) { await submitCompleted(nextAnswers); return; }
+        trackLmsEvent("LMSQuizStep", { question_id: question.id, step: step + 1, answer: answerCategory(option), content_name: "lms_consultation" });
+        setStatus("idle"); setStep(current => current + 1);
+    };
+
+    const handleSubmit = (event: React.FormEvent) => {
+        event.preventDefault();
+        if (savingRef.current) return;
+        if (onContactStep) {
+            const validationErrors = validate(form);
+            setErrors(validationErrors); setTouched({ name: true, phone: true, email: true, message: true });
+            if (Object.keys(validationErrors).length) return;
+            const leadId = ensureLeadId();
+            savingRef.current = true; setStatus("submitting"); setSubmissionError("");
+            void saveLead({ ...form, eventId: leadId, leadId, action: "lead", submissionStage: "contact" }).then(() => {
+                setStatus("idle"); setStep(0);
+            }).catch(err => {
+                setSubmissionError(err instanceof Error ? err.message : "Your contact details could not be saved. Please retry.");
+                setStatus("error");
+            }).finally(() => { savingRef.current = false; });
+        } else if (status === "error" && question && answers[question.id]) { void chooseAnswer(answers[question.id]); }
     };
 
     const fieldClass = (name: keyof FormState) =>
-        "w-full rounded-lg px-4 py-3 text-sm outline-none transition-colors focus:border-[#B89ADC]";
+        "w-full rounded-lg px-4 py-3 text-base outline-none transition-colors focus:border-[#B89ADC]";
 
     return (
         <AnimatePresence>
@@ -352,7 +330,7 @@ export default function ConsultationForm() {
                     exit={{ opacity: 0 }}
                     className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden p-3 sm:p-4"
                     style={{ backgroundColor: "rgba(10,6,18,0.75)", backdropFilter: "blur(4px)" }}
-                    onClick={() => status !== "submitting" && close()}
+                    onClick={() => status !== "submitting" && !bookingBusy && close()}
                     role="dialog"
                     aria-modal="true"
                     aria-labelledby="consultation-form-title"
@@ -373,28 +351,16 @@ export default function ConsultationForm() {
                     >
                         <button
                             onClick={close}
-                            disabled={status === "submitting"}
+                            disabled={status === "submitting" || bookingBusy}
                             aria-label="Close"
-                            className="absolute top-4 right-4 rounded-full p-1.5 transition-colors hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                            className="absolute top-2 right-2 flex h-11 w-11 items-center justify-center rounded-full transition-colors hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
                             style={{ color: "rgba(241,233,250,0.6)" }}
                         >
                             <X className="h-4 w-4" />
                         </button>
 
                         {status === "success" ? (
-                            <div
-                                className="flex flex-col items-center justify-center gap-3 py-10 text-center"
-                                role="status"
-                                aria-live="polite"
-                            >
-                                <CheckCircle2 className="h-10 w-10" style={{ color: "#B89ADC" }} />
-                                <p className="font-display text-lg" style={{ color: "#F1E9FA" }}>
-                                    Thanks! Redirecting you to WhatsApp&hellip;
-                                </p>
-                                <a href={whatsappUrl} className="mt-2 rounded-full bg-[#7B4DB5] px-6 py-3 text-sm font-semibold text-white">
-                                    Open WhatsApp
-                                </a>
-                            </div>
+                            <ConsultationBooking endpoint={GOOGLE_SHEET_ENDPOINT} payload={{ ...form, answers, ...answers, leadId: eventIdRef.current, eventId: eventIdRef.current, submissionStage: "completed", ...(() => { const signals = buildLeadSignals(answers); return { leadSegment: signals.lead_segment, leadScore: signals.lead_score }; })() }} onBusyChange={setBookingBusy} onBack={() => { setStatus("idle"); setStep(QUESTIONS.length - 1); }} />
                         ) : (
                             <>
                                 <h3
@@ -414,17 +380,18 @@ export default function ConsultationForm() {
                                     </p>
                                     {!onContactStep ? (
                                         <>
+                                            <p className="text-sm text-[#B89ADC]">Select an answer to move to the next question.</p>
                                             <h4 ref={questionRef} tabIndex={-1} className="text-lg font-semibold text-white outline-none" id="lms-question">
                                                 {question.title}{question.required ? " *" : " (optional)"}
                                             </h4>
-                                            <fieldset aria-labelledby="lms-question" className="flex min-w-0 flex-col gap-2">
-                                                {question.options.map((option) => (
-                                                    <label key={option} className="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm text-white" style={{ borderColor: answers[question.id] === option ? "#B89ADC" : "rgba(184,154,220,0.2)" }}>
-                                                        <input type="radio" name={question.id} value={option} checked={answers[question.id] === option} onChange={() => { setAnswers((previous) => ({ ...previous, [question.id]: option })); setQuestionError(""); }} className="shrink-0 accent-[#B89ADC]" />
+                                            <div role="group" aria-labelledby="lms-question" className="flex min-w-0 flex-col gap-2">
+                                                {question.options.map(option => (
+                                                    <button type="button" key={option} disabled={status === "submitting"} aria-pressed={answers[question.id] === option} onClick={() => chooseAnswer(option)} className="flex min-h-12 min-w-0 items-center gap-3 rounded-lg border p-3 text-left text-base text-white transition-colors hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#B89ADC] disabled:opacity-60" style={{ borderColor: answers[question.id] === option ? "#B89ADC" : "rgba(184,154,220,0.2)" }}>
+                                                        <span aria-hidden="true" className="h-4 w-4 shrink-0 rounded-full border border-[#B89ADC]" style={{ backgroundColor: answers[question.id] === option ? "#B89ADC" : "transparent" }}/>
                                                         <span className="min-w-0 break-words">{option}</span>
-                                                    </label>
+                                                    </button>
                                                 ))}
-                                            </fieldset>
+                                            </div>
                                             {questionError && <p role="alert" className="text-sm text-red-400">{questionError}</p>}
                                         </>
                                     ) : (
@@ -510,27 +477,16 @@ export default function ConsultationForm() {
                                         placeholder="What are you looking to automate? (optional)"
                                         aria-label="What are you looking to automate? (optional)"
                                         disabled={status === "submitting"}
-                                        className="resize-none w-full rounded-lg px-4 py-3 text-sm outline-none transition-colors focus:border-[#B89ADC]"
+                                        className="resize-none w-full rounded-lg px-4 py-3 text-base outline-none transition-colors focus:border-[#B89ADC]"
                                         style={inputStyle}
                                     />
 
                                         </>
                                     )}
-                                    {!onContactStep && <button type="button" disabled={status === "submitting"} onClick={() => { setStep((current) => current - 1); setQuestionError(""); }} className="text-left text-sm text-[#B89ADC] disabled:opacity-50">Back</button>}
-                                    <button
-                                        type="submit"
-                                        disabled={status === "submitting"}
-                                        className="mt-2 flex items-center justify-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold text-[#F1E9FA] bg-gradient-to-r from-[#5D2E8C] to-[#7B4DB5] transition-all duration-200 hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0 disabled:cursor-not-allowed"
-                                    >
-                                        {status === "submitting" ? (
-                                            <>
-                                                <Loader2 className="h-4 w-4 animate-spin" />
-                                                Submitting...
-                                            </>
-                                        ) : (
-                                            onContactStep ? "Submit" : step === QUESTIONS.length - 1 ? "Submit & open WhatsApp" : "Continue"
-                                        )}
-                                    </button>
+                                    {!onContactStep && <button type="button" disabled={status === "submitting"} onClick={() => { setStep((current) => current - 1); setQuestionError(""); }} className="min-h-11 text-left text-sm text-[#B89ADC] disabled:opacity-50">Back</button>}
+                                    {onContactStep && <button type="submit" disabled={status === "submitting"} className="mt-2 min-h-12 rounded-full bg-gradient-to-r from-[#5D2E8C] to-[#7B4DB5] px-6 py-3.5 text-base font-semibold text-[#F1E9FA] disabled:opacity-50">Start questions</button>}
+                                    {status === "submitting" && <p role="status" className="flex items-center justify-center gap-2 text-sm text-[#B89ADC]"><Loader2 className="h-4 w-4 animate-spin"/>Saving your answers...</p>}
+                                    {status === "error" && !onContactStep && <button type="submit" className="min-h-12 rounded-full bg-[#7B4DB5] px-6 py-3 text-base font-semibold text-white">Retry saving answers</button>}
 
                                     {status === "error" && (
                                         <p

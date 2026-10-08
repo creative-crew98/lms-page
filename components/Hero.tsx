@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import {
   ArrowUpRight,
   LayoutDashboard,
@@ -273,10 +274,12 @@ export default function Hero() {
                 border: "1px solid rgba(255, 61, 61, 0.38)",
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
-                <img
+                <Image
                   src={point.src}
+                  width={20}
+                  height={20}
+                  unoptimized
                   alt=""
                   className="h-5 w-5 shrink-0 opacity-80"
                 />
@@ -494,9 +497,11 @@ export default function Hero() {
                     </span>
                   </div>
                 ) : (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={getImageSrc(activeTab.image)}
+                  <Image
+                    src={activeTab.image}
+                    fill
+                    sizes="(max-width: 768px) 100vw, 1200px"
+                    unoptimized
                     alt={activeTab.label}
                     onError={() => setImgError(true)}
                     className="w-full h-full object-contain"

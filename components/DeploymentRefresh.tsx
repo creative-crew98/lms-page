@@ -42,7 +42,35 @@ export default function DeploymentRefresh() {
             url.searchParams.delete("__lms_update");
             window.history.replaceState(window.history.state, "", url.href);
         }
-        void checkVersion();
+        const preparePage = async () => {
+            // This landing page has no offline mode; retire workers left by older deployments.
+            if ("serviceWorker" in navigator) {
+                try {
+                    const hadController = !!navigator.serviceWorker.controller;
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    const results = await Promise.all(registrations
+                        .filter((registration) => new URL(registration.scope).origin === window.location.origin
+                            && window.location.href.startsWith(registration.scope))
+                        .map((registration) => registration.unregister()));
+                    if (results.some(Boolean) && "caches" in window) {
+                        const names = await caches.keys();
+                        await Promise.all(names
+                            .filter((name) => /^(workbox-precache|next-|lms-)/i.test(name))
+                            .map((name) => caches.delete(name)));
+                    }
+                    if (!disposed && hadController && results.some(Boolean)) {
+                        const freshUrl = new URL(window.location.href);
+                        freshUrl.searchParams.set("__lms_update", String(Date.now()));
+                        window.location.replace(freshUrl.href);
+                        return;
+                    }
+                } catch {
+                    // Version checks still work if worker management is unavailable.
+                }
+            }
+            if (!disposed) await checkVersion();
+        };
+        void preparePage();
         window.addEventListener("pageshow", onShow);
         window.addEventListener("focus", onShow);
         document.addEventListener("visibilitychange", onShow);
