@@ -9,7 +9,7 @@ import { answerCategory, buildLeadSignals, trackLmsEvent } from "./leadTracking"
 import ConsultationBooking from "./ConsultationBooking";
 
 // 👇 paste your Apps Script deployment URL here
-const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbzVOIf-0Jv5VMIO653kIWZmQvXETpTX2azPmWsDNSLixBJ151wKjxjkYCJtdQR9LDRj/exec";
+const GOOGLE_SHEET_ENDPOINT = "https://script.google.com/macros/s/AKfycbxbhjs5ij9LW1ALUF73E-QrNeenHxjGth6t1bzUL1Jl-_o988v_wGtDRL-JDqoWW9Tu/exec";
 
 const QUESTIONS = [
   {
@@ -267,35 +267,37 @@ export default function ConsultationForm() {
         setErrors(validate(form));
     };
 
-    async function submitCompleted(completedAnswers: Record<string, string>) {
-        if (savingRef.current) return;
+    function submitCompleted(completedAnswers: Record<string, string>) {
         const missing = QUESTIONS.findIndex(item => !completedAnswers[item.id]);
         if (missing >= 0) { setStep(missing); setQuestionError("Please select an answer."); return; }
         const validationErrors = validate(form);
         if (Object.keys(validationErrors).length) { setErrors(validationErrors); setTouched({ name: true, phone: true, email: true }); setStep(-1); return; }
-        savingRef.current = true; setStatus("submitting"); setSubmissionError("");
         const signals = buildLeadSignals(completedAnswers);
         if (!eventIdRef.current) eventIdRef.current = `lms_lead_${crypto.randomUUID()}`;
         const eventId = eventIdRef.current;
-        try {
-            await saveLead({ ...form, eventId, leadId: eventId, action: "lead", submissionStage: "completed", leadSegment: signals.lead_segment, leadScore: signals.lead_score, answers: completedAnswers, ...completedAnswers });
+        completedRef.current = true;
+        setStatus("success");
+        setSubmissionError("");
+        void saveLead({ ...form, eventId, leadId: eventId, action: "lead", submissionStage: "completed", leadSegment: signals.lead_segment, leadScore: signals.lead_score, answers: completedAnswers, ...completedAnswers }).then(() => {
             trackLmsEvent("Lead", { ...signals, submission_stage: "completed" }, false, eventId);
             trackLmsEvent("LMSQuizComplete", signals, true, `quiz_${eventId}`);
             trackLmsEvent(`LMSLead_${signals.lead_segment}`, signals, true, `segment_${eventId}`);
             if (signals.lead_segment === "hot") trackLmsEvent("LMSHighIntentLead", signals, true, `intent_${eventId}`);
-            completedRef.current = true;
-            setStatus("success");
-        } catch (err) {
+        }).catch(err => {
             setSubmissionError(err instanceof Error ? err.message : "Your answers could not be saved. Please try again.");
-            setStatus("error");
-        } finally { savingRef.current = false; }
+            console.warn("Completed lead save failed; the booking step remains available.", err);
+        });
     }
 
     const chooseAnswer = async (option: string) => {
         if (savingRef.current || !question) return;
         const nextAnswers = { ...answers, [question.id]: option };
         setAnswers(nextAnswers); setQuestionError(""); setSubmissionError("");
-        if (step === QUESTIONS.length - 1) { await submitCompleted(nextAnswers); return; }
+        if (step === QUESTIONS.length - 1) {
+            // Show booking immediately; the completed lead save continues in the background.
+            submitCompleted(nextAnswers);
+            return;
+        }
         trackLmsEvent("LMSQuizStep", { question_id: question.id, step: step + 1, answer: answerCategory(option), content_name: "lms_consultation" });
         setStatus("idle"); setStep(current => current + 1);
     };
@@ -308,13 +310,10 @@ export default function ConsultationForm() {
             setErrors(validationErrors); setTouched({ name: true, phone: true, email: true, message: true });
             if (Object.keys(validationErrors).length) return;
             const leadId = ensureLeadId();
-            savingRef.current = true; setStatus("submitting"); setSubmissionError("");
-            void saveLead({ ...form, eventId: leadId, leadId, action: "lead", submissionStage: "contact" }).then(() => {
-                setStatus("idle"); setStep(0);
-            }).catch(err => {
-                setSubmissionError(err instanceof Error ? err.message : "Your contact details could not be saved. Please retry.");
-                setStatus("error");
-            }).finally(() => { savingRef.current = false; });
+            setStatus("idle"); setStep(0);
+            void saveLead({ ...form, eventId: leadId, leadId, action: "lead", submissionStage: "contact" }).catch(err => {
+                console.warn("Contact details are being retried by subsequent answer saves.", err);
+            });
         } else if (status === "error" && question && answers[question.id]) { void chooseAnswer(answers[question.id]); }
     };
 
@@ -360,7 +359,10 @@ export default function ConsultationForm() {
                         </button>
 
                         {status === "success" ? (
-                            <ConsultationBooking endpoint={GOOGLE_SHEET_ENDPOINT} payload={{ ...form, answers, ...answers, leadId: eventIdRef.current, eventId: eventIdRef.current, submissionStage: "completed", ...(() => { const signals = buildLeadSignals(answers); return { leadSegment: signals.lead_segment, leadScore: signals.lead_score }; })() }} onBusyChange={setBookingBusy} onBack={() => { setStatus("idle"); setStep(QUESTIONS.length - 1); }} />
+                            <>
+                                <ConsultationBooking endpoint={GOOGLE_SHEET_ENDPOINT} payload={{ ...form, answers, ...answers, leadId: eventIdRef.current, eventId: eventIdRef.current, submissionStage: "completed", ...(() => { const signals = buildLeadSignals(answers); return { leadSegment: signals.lead_segment, leadScore: signals.lead_score }; })() }} onBusyChange={setBookingBusy} onBack={() => { setStatus("idle"); setStep(QUESTIONS.length - 1); }} />
+                                {submissionError && <p role="status" className="px-1 text-xs text-amber-200">Your answers could not be saved yet. Booking is still available; please contact us if you need help.</p>}
+                            </>
                         ) : (
                             <>
                                 <h3
@@ -382,7 +384,7 @@ export default function ConsultationForm() {
                                         <>
                                             <p className="text-sm text-[#B89ADC]">Select an answer to move to the next question.</p>
                                             <h4 ref={questionRef} tabIndex={-1} className="text-lg font-semibold text-white outline-none" id="lms-question">
-                                                {question.title}{question.required ? " *" : " (optional)"}
+                                                {question.title}{question.required ? <span className="whitespace-nowrap"> *</span> : <span className="whitespace-nowrap"> (optional)</span>}
                                             </h4>
                                             <div role="group" aria-labelledby="lms-question" className="flex min-w-0 flex-col gap-2">
                                                 {question.options.map(option => (

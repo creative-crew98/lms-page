@@ -181,11 +181,7 @@ function crmSheetSendLead_(lead, properties) {
   var secret = properties.getProperty("CRM_LEAD_INGEST_SECRET");
   if (!endpoint || !secret)
     return { delivered: false, error: "CRM connection is not configured" };
-  if (
-    !/^https:\/\/[a-z0-9-]+\.supabase\.co\/functions\/v1\/super-worker$/i.test(
-      endpoint,
-    )
-  )
+  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/functions\/v1\/(?:super-worker|lead-ingest)$/i.test(endpoint))
     return { delivered: false, error: "CRM receiver URL is invalid" };
   try {
     var response = UrlFetchApp.fetch(endpoint, {
@@ -225,7 +221,7 @@ function installCrmSheetSync() {
     });
   ScriptApp.newTrigger("syncSheetLeadsToCrm")
     .timeBased()
-    .everyMinutes(5)
+    .everyMinutes(1)
     .create();
   syncSheetLeadsToCrm();
 }
@@ -254,13 +250,14 @@ function bookingCell(value, pattern) {
 }
 function bookedSlots(sheet) {
   if (sheet.getLastRow() < 2) return [];
-  return sheet
-    .getRange(2, 18, sheet.getLastRow() - 1, 2)
-    .getValues()
-    .map(function (row) {
+  const columns = leadColumns_(sheet);
+  const rowCount = sheet.getLastRow() - 1;
+  const dates = sheet.getRange(2, columns.bookingDate, rowCount, 1).getValues();
+  const times = sheet.getRange(2, columns.bookingTime, rowCount, 1).getValues();
+  return dates.map(function (row, index) {
       return {
         date: bookingCell(row[0], "yyyy-MM-dd"),
-        time: bookingCell(row[1], "HH:mm"),
+        time: bookingCell(times[index][0], "HH:mm"),
       };
     })
     .filter(function (slot) {
@@ -345,11 +342,47 @@ function setup() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   if (!spreadsheet)
     throw new Error("Open Apps Script from your Google Sheet first.");
+  spreadsheet.setSpreadsheetTimeZone(BOOKING_ZONE);
+  const leadsSheet = spreadsheet.getSheetByName("Leads");
+  if (leadsSheet)
+    leadsSheet.getRange("A:A").setNumberFormat("dd/MM/yyyy h:mm:ss AM/PM");
   PropertiesService.getScriptProperties().setProperty(
     "SHEET_ID",
     spreadsheet.getId(),
   );
-  getLeadSheet();
+  const sheet = getLeadSheet();
+  repairLegacyLeadAlignment_(sheet);
+  installCrmSheetSync();
+}
+
+function repairLegacyLeadAlignment_(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .getDisplayValues()[0].map(crmSheetNormalizeHeader_);
+  const expected = [
+    ["message", 6], ["role", 7], ["currentlms", 8], ["challenge", 9],
+    ["goal", 10], ["studentcount", 11], ["coursetype", 12],
+    ["priority", 13], ["implementationtimeline", 14],
+    ["leadsegment", 15], ["leadscore", 16],
+  ];
+  if (!expected.every(function (item) { return headers[item[1] - 1] === item[0]; })) return;
+  const roleOptions = [
+    "Coaching / Institute Owner", "Educator / Teacher", "Online Course Creator",
+    "Trainer / Mentor", "EdTech Business Owner", "Other",
+  ];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const rows = sheet.getRange(2, 1, lastRow - 1, Math.max(sheet.getLastColumn(), 17)).getValues();
+  const bookingDateColumn = headers.indexOf("bookingdateist") + 1;
+  const bookingTimeColumn = headers.indexOf("bookingtimeist") + 1;
+  rows.forEach(function (row, index) {
+    if (roleOptions.indexOf(String(row[7] || "")) < 0) return;
+    const corrected = expected.map(function (item) {
+      const sourceColumn = item[1] + 1;
+      if (item[0] === "leadscore" && (sourceColumn === bookingDateColumn || sourceColumn === bookingTimeColumn)) return "";
+      return row[sourceColumn - 1] || "";
+    });
+    sheet.getRange(index + 2, 6, 1, corrected.length).setValues([corrected]);
+  });
 }
 
 function getLeadSheet() {
@@ -357,6 +390,8 @@ function getLeadSheet() {
     PropertiesService.getScriptProperties().getProperty("SHEET_ID") ||
     DEFAULT_SHEET_ID;
   const spreadsheet = SpreadsheetApp.openById(id);
+  if (spreadsheet.getSpreadsheetTimeZone() !== BOOKING_ZONE)
+    spreadsheet.setSpreadsheetTimeZone(BOOKING_ZONE);
   const sheet =
     spreadsheet.getSheetByName("Leads") || spreadsheet.insertSheet("Leads");
   if (sheet.getLastRow() === 0) {
@@ -381,30 +416,55 @@ function getLeadSheet() {
     ]);
     sheet.setFrozenRows(1);
   }
-  const bookingHeaders = sheet.getRange(1, 18, 1, 2).getValues()[0];
-  if (
-    bookingHeaders.some(function (value, index) {
-      return (
-        value && value !== ["Booking date (IST)", "Booking time (IST)"][index]
-      );
-    })
-  )
-    throw new Error(
-      "Columns R and S must be empty or contain the booking headers. Move other data before setup.",
-    );
-  if (!bookingHeaders[0] || !bookingHeaders[1])
-    sheet
-      .getRange(1, 18, 1, 2)
-      .setValues([["Booking date (IST)", "Booking time (IST)"]]);
-  const crmHeader = sheet.getRange(1, 20).getValue();
-  if (crmHeader && crmHeader !== "CRM delivery")
-    throw new Error("Column T is reserved for CRM delivery status. Move other data before setup.");
-  if (!crmHeader) sheet.getRange(1, 20).setValue("CRM delivery");
-  const stageHeader = sheet.getRange(1, 21).getValue();
-  if (stageHeader && stageHeader !== "Submission stage")
-    throw new Error("Column U is reserved for submission stage. Move other data before setup.");
-  if (!stageHeader) sheet.getRange(1, 21).setValue("Submission stage");
+  ensureLeadHeaders_(sheet, [
+    "Booking date (IST)",
+    "Booking time (IST)",
+    "CRM delivery",
+    "Submission stage",
+  ]);
+  ensureTimestampFormat_(sheet, id);
   return sheet;
+}
+
+function ensureTimestampFormat_(sheet, spreadsheetId) {
+  const properties = PropertiesService.getScriptProperties();
+  const marker = "TIMESTAMP_FORMAT_V2_" + spreadsheetId;
+  if (properties.getProperty(marker) === "done") return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn())
+    .getDisplayValues()[0].map(crmSheetNormalizeHeader_);
+  const timestampColumn = headers.indexOf("timestamp") + 1 || 1;
+  sheet.getRange(1, timestampColumn, sheet.getMaxRows(), 1)
+    .setNumberFormat("dd/MM/yyyy h:mm:ss AM/PM");
+  properties.setProperty(marker, "done");
+}
+
+function ensureLeadHeaders_(sheet, requiredHeaders) {
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const headers = sheet.getRange(1, 1, 1, lastColumn).getDisplayValues()[0];
+  const missing = requiredHeaders.filter(function (header) {
+    return headers.indexOf(header) < 0;
+  });
+  if (missing.length)
+    sheet.getRange(1, lastColumn + 1, 1, missing.length).setValues([missing]);
+}
+
+function leadColumns_(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
+  const normalized = headers.map(crmSheetNormalizeHeader_);
+  function find(header) {
+    const index = normalized.indexOf(crmSheetNormalizeHeader_(header));
+    if (index < 0) throw new Error("Missing sheet header: " + header);
+    return index + 1;
+  }
+  return {
+    headers: headers,
+    normalizedHeaders: normalized,
+    timestamp: normalized.indexOf("timestamp") + 1 || 1,
+    eventId: normalized.indexOf("eventid") + 1 || 2,
+    bookingDate: find("Booking date (IST)"),
+    bookingTime: find("Booking time (IST)"),
+    submissionStage: find("Submission stage"),
+  };
 }
 
 function findLeadRow_(sheet, leadId) {
@@ -414,40 +474,74 @@ function findLeadRow_(sheet, leadId) {
 }
 
 function mergeLeadData_(sheet, rowNumber, data, leadId, fields) {
-  const current = sheet.getRange(rowNumber, 1, 1, 21).getValues()[0];
+  const columns = leadColumns_(sheet);
+  const readWidth = Math.max(sheet.getLastColumn(), columns.bookingDate, columns.bookingTime, columns.submissionStage);
+  const current = sheet.getRange(rowNumber, 1, 1, readWidth).getValues()[0];
+  const updates = {};
   function safeText(value) {
     const text = String(value == null ? "" : value);
     if (text.length > 45000) throw new Error("Field is too long.");
     return /^[=+\-@\s]/.test(text) ? "'" + text : text;
   }
-  function setIfProvided(column, value) {
-    if (value !== undefined && value !== null && String(value).trim() !== "") current[column - 1] = safeText(value);
+  function setColumn(column, value) {
+    if (value !== undefined && value !== null && String(value).trim() !== "")
+      updates[column] = safeText(value);
   }
-  current[0] = current[0] || new Date();
-  current[1] = safeText(leadId);
-  setIfProvided(3, data.name);
-  setIfProvided(4, data.phone);
-  setIfProvided(5, data.email);
-  setIfProvided(6, data.bestTimeToCall);
-  setIfProvided(7, data.message);
-  fields.forEach(function(field, index) {
+  function setHeader(names, value) {
+    for (let i = 0; i < names.length; i++) {
+      const column = columns.normalizedHeaders.indexOf(crmSheetNormalizeHeader_(names[i])) + 1;
+      if (column > 0) {
+        setColumn(column, value);
+        return;
+      }
+    }
+  }
+  if (!current[columns.timestamp - 1]) updates[columns.timestamp] = new Date();
+  setColumn(columns.eventId, leadId);
+  setHeader(["Name", "Full name"], data.name);
+  setHeader(["Phone", "Phone number"], data.phone);
+  setHeader(["Email", "Email address"], data.email);
+  setHeader(["Best time to call"], data.bestTimeToCall);
+  setHeader(["Message"], data.message);
+  fields.forEach(function(field) {
     const value = data.answers && data.answers[field] !== undefined ? data.answers[field] : data[field];
-    setIfProvided(8 + index, value);
+    const aliases = {
+      role: ["Role"],
+      currentLms: ["Current LMS"],
+      challenge: ["Challenge"],
+      goal: ["Goal"],
+      studentCount: ["Student count", "Student count range"],
+      courseType: ["Course type"],
+      priority: ["Priority"],
+      implementationTimeline: ["Implementation timeline"],
+    };
+    setHeader(aliases[field] || [field], value);
   });
-  setIfProvided(16, data.leadSegment);
-  setIfProvided(17, data.leadScore);
-  if (data.bookingDate && data.bookingTime) {
-    current[17] = safeText(data.bookingDate);
-    current[18] = safeText(data.bookingTime);
+  setHeader(["Lead segment"], data.leadSegment);
+  setHeader(["Lead score"], data.leadScore);
+  const hasBooking = data.bookingDate && data.bookingTime;
+  if (hasBooking) {
+    setColumn(columns.bookingDate, data.bookingDate);
+    setColumn(columns.bookingTime, data.bookingTime);
   }
   const requestedStage = data.action === "book" ? "booked" : String(data.submissionStage || "contact").toLowerCase();
   const stageRank = { "": 0, contact: 1, answers: 2, completed: 3, booked: 4 };
   if (stageRank[requestedStage] === undefined) throw new Error("Unknown submission stage.");
-  const previousStage = String(current[20] || "").toLowerCase();
-  if ((stageRank[requestedStage] || 0) >= (stageRank[previousStage] || 0)) current[20] = safeText(requestedStage);
-  sheet.getRange(rowNumber, 1, 1, 19).setValues([current.slice(0, 19)]);
-  sheet.getRange(rowNumber, 21).setValue(current[20]);
-  return current;
+  const previousStage = String(current[columns.submissionStage - 1] || "").toLowerCase();
+  const updateStage = (stageRank[requestedStage] || 0) >= (stageRank[previousStage] || 0);
+  if (updateStage) updates[columns.submissionStage] = safeText(requestedStage);
+
+  const updateColumns = Object.keys(updates).map(Number).sort(function (a, b) { return a - b; });
+  for (let i = 0; i < updateColumns.length; ) {
+    const startColumn = updateColumns[i];
+    let end = i + 1;
+    while (end < updateColumns.length && updateColumns[end] === updateColumns[end - 1] + 1) end++;
+    sheet.getRange(rowNumber, startColumn, 1, end - i).setValues([updateColumns.slice(i, end).map(function (column) { return updates[column]; })]);
+    i = end;
+  }
+  sheet.getRange(rowNumber, columns.timestamp)
+    .setNumberFormat("dd/MM/yyyy h:mm:ss AM/PM");
+  return updates;
 }
 
 function doPost(e) {
@@ -482,7 +576,11 @@ function doPost(e) {
         throw new Error("Complete all eight questions first.");
       const previous = findLeadRow_(sheet, leadId);
       if (previous) {
-        const slot = sheet.getRange(previous.getRow(), 18, 1, 2).getValues()[0];
+        const columns = leadColumns_(sheet);
+        const slot = [
+          sheet.getRange(previous.getRow(), columns.bookingDate).getValue(),
+          sheet.getRange(previous.getRow(), columns.bookingTime).getValue(),
+        ];
         if (slot[0] && slot[1])
           return jsonResponse({
             success: true,
@@ -510,9 +608,7 @@ function doPost(e) {
             "That time was just booked. Please choose another available slot.",
         });
       const rowNumber = previous ? previous.getRow() : sheet.getLastRow() + 1;
-      if (!previous) sheet.getRange(rowNumber, 1).setValue(new Date());
       mergeLeadData_(sheet, rowNumber, data, leadId, fields);
-      SpreadsheetApp.flush();
       return jsonResponse({
         success: true,
         booked: true,
@@ -540,9 +636,7 @@ function doPost(e) {
 
     const existing = findLeadRow_(sheet, leadId);
     const rowNumber = existing ? existing.getRow() : sheet.getLastRow() + 1;
-    if (!existing) sheet.getRange(rowNumber, 1).setValue(new Date());
     mergeLeadData_(sheet, rowNumber, data, leadId, fields);
-    SpreadsheetApp.flush();
     return jsonResponse({ success: true });
   } catch (error) {
     return jsonResponse({ success: false, error: error.message });
